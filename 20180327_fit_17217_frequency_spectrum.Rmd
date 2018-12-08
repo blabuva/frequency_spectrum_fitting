@@ -1,0 +1,140 @@
+---
+title: "Pearson Type IV curve fit to the frequency domain"
+author: "Keyong"
+date: "March 27, 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Let's read in the data
+
+```{r, message = F}
+# Load the readxl library
+library(readxl)
+
+# Read in data as a data frame
+fsp <- read_xlsx("17217_frequency_spectrum.xlsx")
+fsp
+```
+
+Let's plot the data
+
+```{r, message = FALSE, warning = FALSE}
+# Load the dplyr and ggplot2 libraries
+library(dplyr)
+library(ggplot2)
+
+# Plot the data as a line
+ggplot(aes(freq, amp), data = fsp) +
+    geom_line() + xlim(0, 50) + theme_classic() +
+    ggtitle("Raw Data") +
+    xlab("Frequency") + ylab("Amplitude")
+```
+
+To fit to a density function, we first need to calculate the **area under the curve**
+
+```{r, message = FALSE, warning = FALSE}
+# Load the DescTools library
+library(DescTools)
+
+# Calculate the area under the curve
+area <- AUC(x = fsp$freq, y = fsp$amp)
+area
+
+```
+
+We want to fit to a **Pearson Type IV density function**. Let's first try to use `geom_smooth()` (which uses the generalized additive model (gam) method):
+
+```{r, message = FALSE, warning = FALSE}
+# Load required libraries
+# library(gsl)
+library(PearsonDS)
+
+# Define the formula for curve fitting
+pearson4Curve <- amp ~ area * dpearsonIV(freq, m, nu, location, scale)
+
+# Plot the data with a fitted curve
+ggplot(aes(freq, amp), data = fsp) +
+    geom_line() + xlim(0, 50) + theme_classic() +
+    geom_smooth(formula = pearson4Curve) +
+    ggtitle("Test fit to the frequency spectrum with GAM") +
+    xlab("Frequency") + ylab("Amplitude")
+```
+
+Since it didn't work very well, let's first use trial and error to find a Pearson Type IV density curve that approximately matches our data:
+
+```{r, message = FALSE, warning = FALSE}
+# Define starting parameters
+m0 <- 1
+nu0 <- -6
+location0 <- 0.5
+scale0 <- 0.5
+
+# Add a column for the predicted amplitude values
+fsp <- 
+    fsp %>% 
+    mutate(ampPredicted = area * 
+            dpearsonIV(freq, m = m0, nu = nu0, location = location0, scale = scale0))
+
+# Plot the data with the Pearson Type IV curve
+ggplot(aes(freq, amp), data = fsp) +
+    geom_line(color = 'Blue') + xlim(0, 50) + theme_classic() +
+    geom_line(aes(freq, ampPredicted), color = 'Red') +
+    ggtitle("Approximate fit to the frequency spectrum by trial and error") +
+    xlab("Frequency") + ylab("Amplitude")
+```
+
+Now we have initial guesses for the 4 parameters, let's use **nonlinear least squares** method to get a better fit to the data:
+
+```{r, message = FALSE, warning = FALSE}
+# Use nonlinear least squares to do curve fitting
+model <- 
+    nls(formula = pearson4Curve, data = fsp, 
+        start = list(m = m0, nu = nu0, location = location0, scale = scale0))
+model
+```
+
+Use the **broom** package to tidy the results
+
+```{r, message = FALSE, warning = FALSE}
+# Import the broom library
+library(broom)
+
+# Tidy the model
+results <- tidy(model)
+results
+```
+
+
+Finally, plot the data with the refined Pearson Type IV model
+
+```{r, message = FALSE, warning = FALSE}
+# Add a column for the predicted amplitude values
+fsp <- 
+    fsp %>% 
+    mutate(ampPredicted = area * 
+            dpearsonIV(freq, m = results$estimate[1], nu = results$estimate[2], 
+                       location = results$estimate[3], scale = results$estimate[4]))
+
+# Plot the data with the Pearson Type IV curve
+ggplot(aes(freq, amp), data = fsp) +
+    geom_line(color = 'Blue') + xlim(0, 50) + theme_classic() +
+    geom_line(aes(freq, ampPredicted), color = 'Red') +
+    ggtitle("Best fit to the frequency spectrum by nls") +
+    xlab("Frequency") + ylab("Amplitude")
+```
+
+```{r}
+# Find the maximum of the fit
+maxAmpPredicted <- max(fsp$ampPredicted)
+maxAmpPredicted
+
+# Print the row wihthe maximum amplitude
+fsp %>% 
+  filter(ampPredicted == maxAmpPredicted)
+
+```
+
